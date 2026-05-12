@@ -1,0 +1,19 @@
+import React from 'react'
+import ReactDOM from 'react-dom/client'
+import App from './App.jsx'
+
+// Artifact ortamında window.storage yoksa boş stub ekle
+if (!window.storage) {
+  window.storage = {
+    get: async () => null,
+    set: async () => null,
+    delete: async () => null,
+    list: async () => ({ keys: [] }),
+  }
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(
+  <React.StrictMode>
+    <App />
+  </React.StrictMode>
+)
