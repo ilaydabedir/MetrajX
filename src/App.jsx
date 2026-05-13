@@ -1234,7 +1234,7 @@ function PdfImportEkrani({ setPozlar, setPozKaynagi, mevcutPozSayisi, pozKaynagi
   const [listeTipi, setListeTipi] = useState("İnşaat Birim Fiyat");
 
   const dosyaOku = (file) => {
-    if (!file || file.type !== "application/pdf") {
+ if (!file || !file.name.toLowerCase().endsWith(".pdf")) {
       setHata("Lütfen PDF dosyası seçin."); setDurum("hata"); return;
     }
     setDosyaAdi(file.name); setDurum("yukleniyor");
