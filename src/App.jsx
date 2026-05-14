@@ -858,10 +858,11 @@ const BOYUTLAR = {
   "m³":[{key:"en",label:"En (m)"},{key:"boy",label:"Boy (m)"},{key:"yukseklik",label:"Y (m)"}],
   "m²":[{key:"en",label:"En (m)"},{key:"boy",label:"Boy (m)"}],
   "m": [{key:"uzunluk",label:"Uzunluk (m)"}],
-  "kg":[{key:"uzunluk",label:"Uzunluk (m)"},{key:"en",label:"Çap/En (mm)"}],
-  "ton":[{key:"uzunluk",label:"Uzunluk (m)"},{key:"en",label:"Genişlik (m)"}],
+  "kg":[{key:"uzunluk",label:"Miktar (kg)"}],
+  "ton":[{key:"uzunluk",label:"Miktar (ton)"}],
   "adet":[{key:"uzunluk",label:"Adet"}],
-  "Sa":[{key:"uzunluk",label:"Saat"}],
+  "Sa":[{key:"uzunluk",label:"Saat (Sa)"}],
+  "Lt":[{key:"uzunluk",label:"Miktar (Lt)"}],
 };
 
 const fmt = (n) => Number(n||0).toLocaleString("tr-TR",{minimumFractionDigits:2});
@@ -870,21 +871,21 @@ const uid = () => Math.random().toString(36).slice(2,8);
 const boyutHesapla = (birim, b) => {
   const e=parseFloat(b.en||0), y=parseFloat(b.boy||0), h=parseFloat(b.yukseklik||0), u=parseFloat(b.uzunluk||0);
   if(birim==="m³") {
-    // Girilen değer sayısına göre hesapla
     const dolu = [e,y,h].filter(v=>v>0);
     if(dolu.length===0) return 0;
-    if(dolu.length===1) return dolu[0];        // sadece 1 değer → direkt miktar
-    if(dolu.length===2) return dolu[0]*dolu[1]; // 2 değer → çarp
-    return e*y*h;                               // 3 değer → en×boy×h
+    if(dolu.length===1) return dolu[0];
+    if(dolu.length===2) return dolu[0]*dolu[1];
+    return e*y*h;
   }
   if(birim==="m²") {
     const dolu = [e,y].filter(v=>v>0);
     if(dolu.length===0) return 0;
-    if(dolu.length===1) return dolu[0];         // sadece 1 değer → direkt
+    if(dolu.length===1) return dolu[0];
     return e*y;
   }
-  if(birim==="m") return u||e;                  // uzunluk yoksa en'i kullan
-  return u||e;
+  if(birim==="m") return u||e;
+  // ton, kg, adet, Sa, Lt vb. — uzunluk/en'den birini al
+  return u||e||y||h;
 };
 
 // ── Veri yapısı ──
@@ -991,6 +992,7 @@ export default function App() {
   }
 
   const [anaEkran, setAnaEkran] = useState("projeler");
+  const [projelerSekme, setProjelerSekme] = useState("metraj"); // ProjelerEkrani sekme kontrolü
   const [aramaMetni, setAramaMetni] = useState("");
   const [seciliIdare, setSeciliIdare] = useState("Tümü");
   const [seciliKat, setSeciliKat] = useState("Tümü");
@@ -1039,6 +1041,13 @@ export default function App() {
       setProjeler(p=>p.map(x=>x.id===projeId?{...x,bolumler:x.bolumler.filter(b=>b.id!==bolumId)}:x))
     );
   };
+  const pozKaldir = (projeId, bolumId, pozId) => {
+    setProjeler(p=>p.map(x=>x.id!==projeId?x:{...x,
+      bolumler:x.bolumler.map(b=>b.id!==bolumId?b:{...b,
+        pozlar:b.pozlar.filter(pk=>pk.pozId!==pozId)
+      })
+    }));
+  };
 
   // ── Poz işlemleri ──
   const pozEkle = (projeId, bolumId, pozId) => {
@@ -1055,8 +1064,7 @@ export default function App() {
     setAktifProjeId(projeId);
     setAnaEkran("projeler");
     setPozEklemeHedef(null);
-    // ProjelerEkrani içindeki aktifSekme'yi resetlemek için event kullan
-    setTimeout(() => window._mxSekme && window._mxSekme("metraj"), 0);
+    setProjelerSekme("metraj");
   };
 
   // ── Satır işlemleri ──
@@ -1089,7 +1097,7 @@ export default function App() {
           bolum.pozlar.forEach(pk => {
             const poz = getPozlar().find(p=>p.id===pk.pozId); if(!poz) return;
             rows.push([`  POZ: ${poz.no} — ${poz.tanim}`,"","","","","",""]);
-            rows.push(["  Açıklama","Giriş Tipi","Boyut 1","Boyut 2","Boyut 3","Çarpan",`Sonuç (${poz.birim})`]);
+            rows.push(["  Açıklama","Giriş Tipi","Adet","Boyut 1","Boyut 2","Boyut 3",`Sonuç (${poz.birim})`]);
             pk.satirlar.forEach(s=>{
               const al=BOYUTLAR[poz.birim]||[{key:"uzunluk"}];
               const son=satirSonuc(s,poz.birim);
@@ -1329,12 +1337,17 @@ export default function App() {
   const tumunuKaldir = () => setSecilenRaporlar(Object.fromEntries(RAPOR_LISTESI.map(r=>[r.key,false])));
   const hepsiSecili = RAPOR_LISTESI.every(r=>secilenRaporlar[r.key]);
 
-  const filtreliPozlar = useMemo(()=>pozlar.filter(p=>{
-    const q=aramaMetni.toLowerCase();
-    return (p.tanim.toLowerCase().includes(q)||p.no.toLowerCase().includes(q))
+  const filtreliPozlar = useMemo(()=>{
+    const normTR = s => s.toLowerCase()
+      .replace(/ğ/g,'g').replace(/ü/g,'u').replace(/ş/g,'s')
+      .replace(/ı/g,'i').replace(/ö/g,'o').replace(/ç/g,'c');
+    const q = normTR(aramaMetni);
+    return pozlar.filter(p=>
+      (!q || normTR(p.tanim).includes(q) || normTR(p.no).includes(q))
       &&(seciliIdare==="Tümü"||p.idare===seciliIdare)
-      &&(seciliKat==="Tümü"||p.kategori===seciliKat);
-  }),[pozlar, aramaMetni,seciliIdare,seciliKat]);
+      &&(seciliKat==="Tümü"||p.kategori===seciliKat)
+    );
+  },[pozlar, aramaMetni, seciliIdare, seciliKat]);
 
   if (yukleniyorStorage) return (
     <div style={{...S.root,alignItems:"center",justifyContent:"center",flexDirection:"column",gap:16}}>
@@ -1364,30 +1377,33 @@ export default function App() {
       )}
 
       {/* ── SOL SIDEBAR ── */}
-      <aside style={{...S.sidebar, width: sidebarDar ? 52 : 220, transition:"width 0.2s"}}>
+      <aside style={{...S.sidebar, width: sidebarDar ? 48 : 220, transition:"width 0.2s"}}>
         {/* Logo + daralt butonu */}
-        <div style={{display:"flex",alignItems:"center",justifyContent: sidebarDar?"center":"space-between",padding: sidebarDar?"12px 0":"12px 14px 12px",borderBottom:"1px solid #1e293b",marginBottom:8}}>
-          {!sidebarDar && <div style={{display:"flex",alignItems:"center",gap:8}}>
-            <span style={{fontSize:20}}>⚙</span>
-            <div style={S.logoTitle}>MetrajX</div>
+        <div style={{display:"flex",alignItems:"center",justifyContent: sidebarDar?"center":"space-between",padding: sidebarDar?"12px 0":"12px 14px",borderBottom:"1px solid #161b22",marginBottom:6}}>
+          {!sidebarDar && <div style={{display:"flex",alignItems:"center",gap:9}}>
+            <div style={{width:26,height:26,borderRadius:7,background:"linear-gradient(135deg,#1f6feb,#7948d3)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:13,flexShrink:0}}>⚙</div>
+            <div>
+              <div style={S.logoTitle}>MetrajX</div>
+              <div style={S.logoSub}>Metraj Hesaplama</div>
+            </div>
           </div>}
-          {sidebarDar && <span style={{fontSize:20}}>⚙</span>}
+          {sidebarDar && <div style={{width:26,height:26,borderRadius:7,background:"linear-gradient(135deg,#1f6feb,#7948d3)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:13}}>⚙</div>}
           <button onClick={()=>setSidebarDar(d=>!d)}
-            style={{background:"transparent",border:"1px solid #1e293b",borderRadius:6,color:"#475569",cursor:"pointer",fontSize:12,padding:"3px 6px",flexShrink:0}}>
+            style={{background:"transparent",border:"1px solid #21262d",borderRadius:5,color:"#7d8590",cursor:"pointer",fontSize:10,padding:"3px 5px",flexShrink:0}}>
             {sidebarDar?"▶":"◀"}
           </button>
         </div>
 
         {/* Nav */}
         <div style={{padding:"0 6px"}}>
-          {[["projeler","🏗","Projeler"],["kutuphane","📚","Poz Kütüphanesi"],["pdfimport","📤","Poz Güncelle"]].map(([key,icon,label])=>(
+          {[["projeler","🏗","Projeler"],["kutuphane","📚","Poz Kütüphanesi"],].map(([key,icon,label])=>(
             <button key={key} title={label}
               style={{...S.navItem, justifyContent: sidebarDar?"center":"flex-start", padding: sidebarDar?"10px 0":"9px 10px",
                 ...(anaEkran===key?S.navItemAktif:{})}
               } onClick={()=>setAnaEkran(key)}>
               <span style={{fontSize:16}}>{icon}</span>
               {!sidebarDar && <span style={{flex:1,fontSize:13}}>{label}</span>}
-              {!sidebarDar && key==="pdfimport" && <span style={{fontSize:9,backgroundColor:"#1e3a5f",color:"#60a5fa",padding:"2px 4px",borderRadius:3,fontWeight:700}}>YENİ</span>}
+              
             </button>
           ))}
         </div>
@@ -1397,8 +1413,8 @@ export default function App() {
         {/* Poz kaynağı - sadece geniş modda */}
         {!sidebarDar && (
           <div style={{padding:"6px 10px",backgroundColor:"#050a14",margin:"0 6px 6px",borderRadius:6,border:"1px solid #1e293b"}}>
-            <div style={{fontSize:9,color:"#475569",fontWeight:700,textTransform:"uppercase",marginBottom:2}}>Poz Kaynağı</div>
-            <div style={{fontSize:11,color:"#60a5fa",fontWeight:600}}>{pozKaynagi.tip} {pozKaynagi.yil}{pozKaynagi.ay?` / ${pozKaynagi.ay}`:""}</div>
+            <div style={{fontSize:9,color:"#475569",fontWeight:700,textTransform:"uppercase",marginBottom:2}}>Poz Kütüphanesi</div>
+            <div style={{fontSize:11,color:"#60a5fa",fontWeight:600}}>{pozKaynagi.yil} {pozKaynagi.ay}</div>
             <div style={{fontSize:10,color:"#334155"}}>{pozlar.length} poz</div>
           </div>
         )}
@@ -1421,6 +1437,8 @@ export default function App() {
             yeniProjeAd={yeniProjeAd} setYeniProjeAd={setYeniProjeAd}
             yeniProjeRenk={yeniProjeRenk} setYeniProjeRenk={setYeniProjeRenk}
             genelToplam={genelToplam} excelExport={excelExport}
+            pozKaldir={pozKaldir}
+            dışSekme={projelerSekme} setDışSekme={setProjelerSekme}
           />
         )}
         {anaEkran==="kutuphane" && (
@@ -1430,13 +1448,6 @@ export default function App() {
             seciliKat={seciliKat} setSeciliKat={setSeciliKat}
             pozEklemeHedef={pozEklemeHedef} setPozEklemeHedef={setPozEklemeHedef}
             pozEkle={pozEkle} aktifProje={aktifProje} setAnaEkran={setAnaEkran}
-          />
-        )}
-        {anaEkran==="pdfimport" && (
-          <PdfImportEkrani
-            setPozlar={setPozlar} setPozKaynagi={setPozKaynagi}
-            mevcutPozSayisi={pozlar.length} pozKaynagi={pozKaynagi}
-            setAnaEkran={setAnaEkran}
           />
         )}
 
@@ -1506,63 +1517,95 @@ function ProjelerEkrani({projeler,aktifProjeId,setAktifProjeId,setProjeler,proje
   projeAdGuncelle,bolumEkle,bolumSil,bolumAdGuncelle,satirGuncelle,boyutGuncelle,
   satirEkle,satirSil,setPozEklemeHedef,setAnaEkran,
   yeniProjeAd,setYeniProjeAd,yeniProjeRenk,setYeniProjeRenk,
-  genelToplam, excelExport}) {
+  genelToplam, excelExport, pozKaldir, dışSekme, setDışSekme}) {
 
   const [projeModalAc, setProjeModalAc] = useState(false);
   const [bolumModalAc, setBolumModalAc] = useState(null);
   const [yeniBolumAd, setYeniBolumAd] = useState("");
   const [aktifSekme, setAktifSekme] = useState("metraj");
+  const [projePanelDar, setProjePanelDar] = useState(false);
 
-  // pozEkle sonrası sekmeyi resetlemek için global hook
-  window._mxSekme = setAktifSekme; // metraj | ozet
+  // Dışarıdan sekme değişikliği (pozEkle sonrası)
+  const gercekSekme = dışSekme || aktifSekme;
+  const setSekme = (s) => { setAktifSekme(s); setDışSekme && setDışSekme(null); };
 
   const aktifProje = projeler.find(p=>p.id===aktifProjeId) || projeler[0];
 
   return (
     <div style={{display:"flex",height:"100%",overflow:"hidden"}}>
       {/* Sol panel - proje listesi */}
-      <div style={{width:240,borderRight:"1px solid #1e293b",display:"flex",flexDirection:"column",backgroundColor:"#0d1424",flexShrink:0}}>
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"14px 14px 10px"}}>
-          <div style={{fontSize:13,fontWeight:800,color:"#f1f5f9"}}>Projeler</div>
-          <button style={{...S.birincilBtn,padding:"4px 12px",fontSize:12}} onClick={()=>setProjeModalAc(true)}>+ Yeni</button>
+      <div style={{width:projePanelDar?44:240,borderRight:"1px solid #1e293b",display:"flex",flexDirection:"column",backgroundColor:"#0d1424",flexShrink:0,transition:"width 0.2s",overflow:"hidden"}}>
+        <div style={{display:"flex",justifyContent:projePanelDar?"center":"space-between",alignItems:"center",padding:projePanelDar?"10px 0":"12px 12px 10px",borderBottom:"1px solid #1e293b",marginBottom:6}}>
+          {!projePanelDar && <div style={{fontSize:13,fontWeight:800,color:"#f1f5f9"}}>Projeler</div>}
+          <div style={{display:"flex",gap:6,alignItems:"center"}}>
+            {!projePanelDar && <button style={{...S.birincilBtn,padding:"4px 10px",fontSize:12}} onClick={()=>setProjeModalAc(true)}>+ Yeni</button>}
+            <button onClick={()=>setProjePanelDar(d=>!d)}
+              style={{background:"transparent",border:"1px solid #1e293b",borderRadius:6,color:"#475569",cursor:"pointer",fontSize:11,padding:"3px 6px",flexShrink:0}}>
+              {projePanelDar?"▶":"◀"}
+            </button>
+          </div>
         </div>
 
-        <div style={{flex:1,overflowY:"auto",padding:"0 8px"}}>
-          {projeler.length===0 && (
-            <div style={{padding:20,textAlign:"center",color:"#475569",fontSize:12}}>Henüz proje yok.</div>
-          )}
-          {projeler.map(proje=>{
-            const aktif = aktifProjeId===proje.id;
-            return (
-              <div key={proje.id}
-                style={{borderRadius:10,padding:"11px 12px",marginBottom:6,cursor:"pointer",
-                  border:`1px solid ${aktif?proje.renk:"#1e293b"}`,
-                  backgroundColor:aktif?"#0d1f3c":"#111827",transition:"all 0.15s"}}
-                onClick={()=>setAktifProjeId(proje.id)}>
-                <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:5}}>
-                  <span style={{width:9,height:9,borderRadius:"50%",backgroundColor:proje.renk,flexShrink:0}}/>
-                  <span style={{fontSize:13,fontWeight:700,color:aktif?"#f1f5f9":"#94a3b8",flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
-                    {proje.ad}
-                  </span>
-                  {aktif && projeler.length>1 && (
-                    <button style={{background:"transparent",border:"none",color:"#475569",cursor:"pointer",fontSize:12,padding:0,flexShrink:0}}
-                      onClick={e=>{e.stopPropagation();projeSil(proje.id);}}>🗑</button>
-                  )}
+        {projePanelDar ? (
+          /* Dar mod — sadece renkli nokta butonları */
+          <div style={{flex:1,overflowY:"auto",padding:"4px 6px",display:"flex",flexDirection:"column",gap:4}}>
+            {projeler.map(proje=>{
+              const aktif = aktifProjeId===proje.id;
+              return (
+                <button key={proje.id} title={proje.ad}
+                  onClick={()=>setAktifProjeId(proje.id)}
+                  style={{width:32,height:32,borderRadius:8,border:`2px solid ${aktif?proje.renk:"transparent"}`,
+                    backgroundColor:aktif?"#0d1f3c":"transparent",cursor:"pointer",
+                    display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>
+                  <span style={{width:10,height:10,borderRadius:"50%",backgroundColor:proje.renk,display:"block"}}/>
+                </button>
+              );
+            })}
+            <button title="Yeni Proje" onClick={()=>{setProjePanelDar(false);setProjeModalAc(true);}}
+              style={{width:32,height:32,borderRadius:8,border:"1px dashed #334155",backgroundColor:"transparent",
+                cursor:"pointer",color:"#475569",fontSize:16,display:"flex",alignItems:"center",justifyContent:"center"}}>+</button>
+          </div>
+        ) : (
+          /* Geniş mod */
+          <div style={{flex:1,overflowY:"auto",padding:"0 8px"}}>
+            {projeler.length===0 && (
+              <div style={{padding:20,textAlign:"center",color:"#475569",fontSize:12}}>Henüz proje yok.</div>
+            )}
+            {projeler.map(proje=>{
+              const aktif = aktifProjeId===proje.id;
+              return (
+                <div key={proje.id}
+                  style={{borderRadius:10,padding:"11px 12px",marginBottom:6,cursor:"pointer",
+                    border:`1px solid ${aktif?proje.renk:"#1e293b"}`,
+                    backgroundColor:aktif?"#0d1f3c":"#111827",transition:"all 0.15s"}}
+                  onClick={()=>setAktifProjeId(proje.id)}>
+                  <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:5}}>
+                    <span style={{width:9,height:9,borderRadius:"50%",backgroundColor:proje.renk,flexShrink:0}}/>
+                    <span style={{fontSize:13,fontWeight:700,color:aktif?"#f1f5f9":"#94a3b8",flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+                      {proje.ad}
+                    </span>
+                    {aktif && projeler.length>1 && (
+                      <button style={{background:"transparent",border:"none",color:"#475569",cursor:"pointer",fontSize:12,padding:0,flexShrink:0}}
+                        onClick={e=>{e.stopPropagation();projeSil(proje.id);}}>🗑</button>
+                    )}
+                  </div>
+                  <div style={{display:"flex",justifyContent:"space-between",fontSize:11}}>
+                    <span style={{color:"#475569"}}>{proje.bolumler.length} bölüm · {proje.bolumler.reduce((a,b)=>a+b.pozlar.length,0)} poz</span>
+                    <span style={{color:aktif?"#10b981":"#475569",fontWeight:600}}>₺{fmt(projeToplam(proje)).split(",")[0]}</span>
+                  </div>
                 </div>
-                <div style={{display:"flex",justifyContent:"space-between",fontSize:11}}>
-                  <span style={{color:"#475569"}}>{proje.bolumler.length} bölüm · {proje.bolumler.reduce((a,b)=>a+b.pozlar.length,0)} poz</span>
-                  <span style={{color:aktif?"#10b981":"#475569",fontWeight:600}}>₺{fmt(projeToplam(proje)).split(",")[0]}</span>
-                </div>
-              </div>
-            );
-          })}
-        </div>
+              );
+            })}
+          </div>
+        )}
 
-        {/* Genel toplam */}
-        <div style={{padding:"10px 12px",borderTop:"1px solid #1e293b"}}>
-          <div style={{fontSize:9,color:"#475569",fontWeight:700,textTransform:"uppercase",marginBottom:3}}>Genel Toplam</div>
-          <div style={{fontSize:15,fontWeight:800,color:"#10b981"}}>₺{fmt(genelToplam)}</div>
-        </div>
+        {/* Genel toplam — sadece geniş modda */}
+        {!projePanelDar && (
+          <div style={{padding:"10px 12px",borderTop:"1px solid #1e293b"}}>
+            <div style={{fontSize:9,color:"#475569",fontWeight:700,textTransform:"uppercase",marginBottom:3}}>Genel Toplam</div>
+            <div style={{fontSize:15,fontWeight:800,color:"#10b981"}}>₺{fmt(genelToplam)}</div>
+          </div>
+        )}
       </div>
 
       {/* Sağ panel - proje içeriği */}
@@ -1582,10 +1625,10 @@ function ProjelerEkrani({projeler,aktifProjeId,setAktifProjeId,setProjeler,proje
               {/* Proje içi sekmeler */}
               {[["metraj","📐 Metraj"],["ozet","📊 Özet"]].map(([key,label])=>(
                 <button key={key} style={{padding:"12px 14px",background:"transparent",border:"none",
-                  borderBottom: aktifSekme===key?"2px solid #3b82f6":"2px solid transparent",
-                  color: aktifSekme===key?"#60a5fa":"#64748b",cursor:"pointer",fontSize:13,
-                  fontWeight:aktifSekme===key?700:500,marginBottom:-1}}
-                  onClick={()=>setAktifSekme(key)}>{label}</button>
+                  borderBottom: gercekSekme===key?"2px solid #3b82f6":"2px solid transparent",
+                  color: gercekSekme===key?"#60a5fa":"#64748b",cursor:"pointer",fontSize:13,
+                  fontWeight:gercekSekme===key?700:500,marginBottom:-1}}
+                  onClick={()=>setSekme(key)}>{label}</button>
               ))}
               <div style={{flex:1}}/>
               <span style={{fontSize:13,color:"#10b981",fontWeight:700}}>₺{fmt(projeToplam(aktifProje))}</span>
@@ -1593,7 +1636,7 @@ function ProjelerEkrani({projeler,aktifProjeId,setAktifProjeId,setProjeler,proje
 
             {/* İçerik */}
             <div style={{flex:1,overflow:"auto"}}>
-              {aktifSekme==="metraj" && (
+              {gercekSekme==="metraj" && (
                 <MetrajEkrani proje={aktifProje}
                   satirGuncelle={satirGuncelle} boyutGuncelle={boyutGuncelle}
                   satirEkle={satirEkle} satirSil={satirSil}
@@ -1601,9 +1644,10 @@ function ProjelerEkrani({projeler,aktifProjeId,setAktifProjeId,setProjeler,proje
                   bolumSil={bolumSil} bolumAdGuncelle={bolumAdGuncelle}
                   projeAdGuncelle={projeAdGuncelle} projeSil={projeSil}
                   setPozEklemeHedef={setPozEklemeHedef} setAnaEkran={setAnaEkran}
+                  pozKaldir={pozKaldir}
                 />
               )}
-              {aktifSekme==="ozet" && (
+              {gercekSekme==="ozet" && (
                 <OzetEkrani projeler={[aktifProje]} genelToplam={projeToplam(aktifProje)} excelExport={excelExport} />
               )}
             </div>
@@ -1658,7 +1702,7 @@ function ProjelerEkrani({projeler,aktifProjeId,setAktifProjeId,setProjeler,proje
 
 
 // ── Metraj Ekranı ─────────────────────────────────────────────────
-function MetrajEkrani({proje,satirGuncelle,boyutGuncelle,satirEkle,satirSil,bolumEkle,bolumSil,bolumAdGuncelle,projeAdGuncelle,projeSil,setPozEklemeHedef,setAnaEkran}) {
+function MetrajEkrani({proje,satirGuncelle,boyutGuncelle,satirEkle,satirSil,bolumEkle,bolumSil,bolumAdGuncelle,projeAdGuncelle,projeSil,setPozEklemeHedef,setAnaEkran,pozKaldir}) {
   const [duzenleAd, setDuzenleAd] = useState(null); // bolumId veya "proje"
   const [adDeger, setAdDeger] = useState("");
 
@@ -1730,27 +1774,38 @@ function MetrajEkrani({proje,satirGuncelle,boyutGuncelle,satirEkle,satirSil,bolu
             return (
               <div key={pk.pozId} style={S.pozBlok}>
                 <div style={S.pozBlokBaslik}>
-                  <div style={{display:"flex",alignItems:"center",gap:8}}>
-                    <span style={{fontFamily:"monospace",fontSize:12,color:"#6366f1",fontWeight:700}}>{poz.no}</span>
-                    <span style={{...S.chip,backgroundColor:(KAT_RENK[poz.kategori]||"#475569")+"18",color:KAT_RENK[poz.kategori]||"#475569"}}>{poz.kategori}</span>
-                  </div>
-                  <div style={{fontSize:13,color:"#cbd5e1",marginTop:4,marginBottom:8}}>{poz.tanim}</div>
-                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                    <span style={{fontSize:12,color:"#475569"}}>Birim: {poz.birim} &nbsp;|&nbsp; ₺{fmt(poz.birimFiyat)}/{poz.birim}</span>
-                    <div style={{display:"flex",gap:12,alignItems:"center"}}>
-                      {minha>0 && <span style={{fontSize:12,color:"#ef4444"}}>Brüt: {fmt(brut)} — Minha: {fmt(minha)}</span>}
-                      <span style={{fontSize:13,color:"#10b981",fontWeight:700}}>Net: {fmt(net)} {poz.birim}</span>
-                      <span style={{fontSize:13,color:"#60a5fa",fontWeight:700}}>= ₺{fmt(net*poz.birimFiyat)}</span>
+                  <div style={{display:"flex",alignItems:"flex-start",gap:10,justifyContent:"space-between"}}>
+                    <div style={{flex:1}}>
+                      <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:4}}>
+                        <span style={{fontFamily:"monospace",fontSize:11,color:"#7948d3",fontWeight:700,backgroundColor:"#7948d318",padding:"1px 6px",borderRadius:4}}>{poz.no}</span>
+                        <span style={{...S.chip,backgroundColor:(KAT_RENK[poz.kategori]||"#484f58")+"22",color:KAT_RENK[poz.kategori]||"#484f58",fontSize:9}}>{poz.kategori}</span>
+                      </div>
+                      <div style={{fontSize:13,color:"#e6edf3",fontWeight:500,lineHeight:1.4,marginBottom:6}}>{poz.tanim}</div>
+                      <div style={{display:"flex",alignItems:"center",gap:16,flexWrap:"wrap"}}>
+                        <span style={{fontSize:11,color:"#7d8590"}}>
+                          {poz.birim} &nbsp;·&nbsp; <span style={{color:"#c9d1d9"}}>₺{fmt(poz.birimFiyat)}</span> / {poz.birim}
+                        </span>
+                        {minha>0 && <span style={{fontSize:11,color:"#f85149"}}>⊖ Minha: {fmt(minha)} {poz.birim}</span>}
+                      </div>
+                    </div>
+                    <div style={{display:"flex",flexDirection:"column",alignItems:"flex-end",gap:4,flexShrink:0}}>
+                      <button style={{background:"transparent",border:"none",color:"#484f58",cursor:"pointer",fontSize:13,padding:"0 2px",lineHeight:1}}
+                        title="Pozu Kaldır"
+                        onClick={()=>pozKaldir&&pozKaldir(proje.id,bolum.id,pk.pozId)}>✕</button>
+                      <div style={{textAlign:"right",marginTop:4}}>
+                        <div style={{fontSize:11,color:"#7d8590"}}>Net miktar</div>
+                        <div style={{fontSize:14,fontWeight:700,color:"#3fb950"}}>{fmt(net)} {poz.birim}</div>
+                        <div style={{fontSize:13,fontWeight:800,color:"#79c0ff"}}>₺{fmt(net*poz.birimFiyat)}</div>
+                      </div>
                     </div>
                   </div>
                 </div>
-
                 {/* Tablo başlık */}
                 <div style={S.cetvelBaslik}>
                   <span style={{flex:2}}>Açıklama / Mahal</span>
                   <span style={{flex:1,textAlign:"center"}}>Giriş</span>
+                  <span style={{flex:0.7,textAlign:"center"}}>Adet</span>
                   {alanlar.map(a=><span key={a.key} style={{flex:1,textAlign:"center"}}>{a.label}</span>)}
-                  <span style={{flex:0.8,textAlign:"center"}}>Çarpan</span>
                   <span style={{flex:1,textAlign:"center"}}>Sonuç ({poz.birim})</span>
                   <span style={{width:56}}/>
                 </div>
@@ -1776,6 +1831,18 @@ function MetrajEkrani({proje,satirGuncelle,boyutGuncelle,satirEkle,satirSil,bolu
                             onClick={()=>satirGuncelle(proje.id,bolum.id,pk.pozId,satir.id,"girisTipi","direkt")}>Direkt</button>
                         </div>
                       </span>
+                      <span style={{flex:0.7,display:"flex",justifyContent:"center"}}>
+                        <input type="number" min="1" style={{...S.sayiInput,...(isMinha?{borderColor:"#7f1d1d"}:{})}}
+                          placeholder="1" value={satir.carpan||""}
+                          onChange={e=>satirGuncelle(proje.id,bolum.id,pk.pozId,satir.id,"carpan",e.target.value)}/>
+                      </span>
+                        <div style={S.toggle}>
+                          <button style={{...S.toggleBtn,...(satir.girisTipi==="boyut"?(isMinha?S.toggleBtnMinha:S.toggleBtnAktif):{})}}
+                            onClick={()=>satirGuncelle(proje.id,bolum.id,pk.pozId,satir.id,"girisTipi","boyut")}>Boyut</button>
+                          <button style={{...S.toggleBtn,...(satir.girisTipi==="direkt"?(isMinha?S.toggleBtnMinha:S.toggleBtnAktif):{})}}
+                            onClick={()=>satirGuncelle(proje.id,bolum.id,pk.pozId,satir.id,"girisTipi","direkt")}>Direkt</button>
+                        </div>
+                      </span>
                       {satir.girisTipi==="boyut"
                         ? alanlar.map(a=>(
                             <span key={a.key} style={{flex:1,display:"flex",justifyContent:"center"}}>
@@ -1788,11 +1855,6 @@ function MetrajEkrani({proje,satirGuncelle,boyutGuncelle,satirEkle,satirSil,bolu
                               placeholder="Miktar" value={satir.miktar||""}
                               onChange={e=>satirGuncelle(proje.id,bolum.id,pk.pozId,satir.id,"miktar",e.target.value)}/>
                           </span>}
-                      <span style={{flex:0.8,display:"flex",justifyContent:"center"}}>
-                        <input type="number" style={{...S.sayiInput,...(isMinha?{borderColor:"#7f1d1d"}:{})}}
-                          placeholder="1" value={satir.carpan||""}
-                          onChange={e=>satirGuncelle(proje.id,bolum.id,pk.pozId,satir.id,"carpan",e.target.value)}/>
-                      </span>
                       <span style={{flex:1,textAlign:"center",fontWeight:700,fontSize:13,
                         color:isMinha?"#ef4444":(son>0?"#10b981":"#475569")}}>
                         {son>0?(isMinha?`-${fmt(son)}`:fmt(son)):"—"}
@@ -1812,7 +1874,7 @@ function MetrajEkrani({proje,satirGuncelle,boyutGuncelle,satirEkle,satirSil,bolu
                 {/* 5. Poz ara toplam satırı */}
                 {pk.satirlar.length > 0 && (
                   <div style={{display:"flex",gap:8,padding:"6px 14px",backgroundColor:"#050a14",borderTop:"1px solid #1e3a5f",alignItems:"center"}}>
-                    <span style={{flex:2+1+alanlar.length*1+0.8,fontSize:11,color:"#475569",textAlign:"right",paddingRight:8}}>
+                    <span style={{flex:2+1+0.7+alanlar.length*1,fontSize:11,color:"#475569",textAlign:"right",paddingRight:8}}>
                       {pozMinha(pk,poz.birim)>0
                         ? <span>Brüt: <b style={{color:"#94a3b8"}}>{fmt(pozBrut(pk,poz.birim))}</b> − Minha: <b style={{color:"#ef4444"}}>{fmt(pozMinha(pk,poz.birim))}</b> =</span>
                         : <span>Ara Toplam:</span>}
@@ -1859,7 +1921,7 @@ function KutuphaneEkrani({pozlar,aramaMetni,setAramaMetni,seciliIdare,setSeciliI
           <p style={S.aciklama}>{pozlar.length} poz yüklü</p>
         </div>
         {pozEklemeHedef && (
-          <button style={S.ikinciBtn} onClick={()=>{setPozEklemeHedef(null);setAnaEkran("metraj");}}>← Metraj'a Dön</button>
+          <button style={S.ikinciBtn} onClick={()=>{setPozEklemeHedef(null);setAnaEkran("projeler");}}>← Metraj'a Dön</button>
         )}
       </div>
 
@@ -1904,7 +1966,11 @@ function KutuphaneEkrani({pozlar,aramaMetni,setAramaMetni,seciliIdare,setSeciliI
       <div style={{fontSize:12,color:"#475569",marginBottom:12}}>{pozlar.length} poz</div>
       <div style={{display:"flex",flexDirection:"column",gap:8}}>
         {pozlar.map(poz=>(
-          <div key={poz.id} style={{...S.pozKart,cursor:"pointer"}} onClick={()=>setDetayPoz(poz)}>
+          <div key={poz.id} 
+            style={{...S.pozKart}}
+            onMouseEnter={e=>{e.currentTarget.style.borderColor='#388bfd';e.currentTarget.style.backgroundColor='#111823';}}
+            onMouseLeave={e=>{e.currentTarget.style.borderColor='#21262d';e.currentTarget.style.backgroundColor='#0d1117';}}
+            onClick={()=>setDetayPoz(poz)}>
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
               <span style={{fontFamily:"monospace",fontSize:12,color:"#6366f1",fontWeight:700}}>{poz.no}</span>
               <span style={{...S.chip,backgroundColor:(KAT_RENK[poz.kategori]||"#475569")+"18",color:KAT_RENK[poz.kategori]||"#475569"}}>{poz.kategori}</span>
@@ -1994,7 +2060,7 @@ function KutuphaneEkrani({pozlar,aramaMetni,setAramaMetni,seciliIdare,setSeciliI
             )}
 
             {/* Rayiçler */}
-            {detayPoz.rayicler?.length > 0 && (
+            {detayPoz.rayicler?.length > 0 ? (
               <div style={{marginBottom:16}}>
                 <div style={{fontSize:10,color:"#475569",fontWeight:700,textTransform:"uppercase",marginBottom:8}}>🔩 Rayiç Analizi ({detayPoz.rayicler.length} kalem)</div>
                 <div style={{backgroundColor:"#111827",border:"1px solid #1e293b",borderRadius:10,overflow:"hidden"}}>
@@ -2028,6 +2094,13 @@ function KutuphaneEkrani({pozlar,aramaMetni,setAramaMetni,seciliIdare,setSeciliI
                     <span style={{flex:1,textAlign:"right",color:"#10b981",fontWeight:800,fontSize:14}}>₺{fmt(detayPoz.birimFiyat)}</span>
                   </div>
                 </div>
+              </div>
+            ) : null}
+
+            {/* Ekle butonu */}
+            {!detayPoz.rayicler?.length && (
+              <div style={{backgroundColor:"#111827",border:"1px solid #1e293b",borderRadius:8,padding:"12px 16px",marginBottom:12,textAlign:"center",color:"#475569",fontSize:12}}>
+                Bu poz için analiz verisi mevcut değil
               </div>
             )}
 
@@ -2113,407 +2186,87 @@ function OzetEkrani({projeler,genelToplam,excelExport}) {
 
 // ── Stiller ─────────────────────────────────────────────────────
 const S = {
-  root:{display:"flex",height:"100vh",backgroundColor:"#0a0f1e",fontFamily:"'Segoe UI',system-ui,sans-serif",color:"#e2e8f0",overflow:"hidden"},
-  sidebar:{width:240,backgroundColor:"#0d1424",borderRight:"1px solid #1e293b",display:"flex",flexDirection:"column",flexShrink:0,overflow:"hidden"},
-  logo:{display:"flex",alignItems:"center",gap:10,padding:"16px 16px 14px",borderBottom:"1px solid #1e293b"},
-  logoTitle:{fontSize:15,fontWeight:800,color:"#f1f5f9"},logoSub:{fontSize:10,color:"#475569"},
-  projelerBaslik:{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"12px 16px 6px"},
-  miniEkleBtn:{width:22,height:22,borderRadius:5,border:"1px solid #1e293b",backgroundColor:"#1e293b",color:"#60a5fa",cursor:"pointer",fontSize:16,display:"flex",alignItems:"center",justifyContent:"center"},
-  projeListe:{flex:1,overflowY:"auto",padding:"0 8px"},
-  projeTab:{display:"flex",alignItems:"center",gap:8,padding:"8px 10px",borderRadius:8,cursor:"pointer",marginBottom:2,borderLeft:"3px solid transparent"},
-  projeTabAktif:{backgroundColor:"#111827"},
-  navBolum:{padding:"8px 10px",borderTop:"1px solid #1e293b"},
-  navItem:{display:"flex",alignItems:"center",gap:10,padding:"8px 10px",borderRadius:8,border:"none",background:"transparent",color:"#64748b",cursor:"pointer",fontSize:13,fontWeight:500,width:"100%",textAlign:"left"},
-  navItemAktif:{backgroundColor:"#1e3a5f",color:"#60a5fa",fontWeight:600},
-  sidebarAlt:{display:"flex",justifyContent:"space-between",padding:"10px 16px",borderTop:"1px solid #1e293b"},
-  miniEtiket:{fontSize:9,color:"#475569",fontWeight:700,textTransform:"uppercase",marginBottom:2},
-  miniDeger:{fontSize:12,fontWeight:800,color:"#60a5fa"},
-  excelBtn:{margin:"8px 10px",padding:"8px 0",backgroundColor:"#052e16",border:"1px solid #16a34a",borderRadius:8,color:"#4ade80",cursor:"pointer",fontSize:12,fontWeight:700},
-  excelBtnBuyuk:{padding:"9px 18px",backgroundColor:"#052e16",border:"1px solid #16a34a",borderRadius:8,color:"#4ade80",cursor:"pointer",fontSize:13,fontWeight:700},
-  main:{flex:1,overflow:"auto"},
-  ekran:{padding:24,maxWidth:1100,margin:"0 auto"},
-  ekranBaslik:{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:20},
-  h1:{fontSize:20,fontWeight:800,color:"#f1f5f9",margin:0},aciklama:{fontSize:12,color:"#475569",margin:"3px 0 0"},
-  bolumBlok:{backgroundColor:"#111827",border:"1px solid #1e293b",borderRadius:12,marginBottom:16,overflow:"hidden"},
-  bolumBaslik:{display:"flex",alignItems:"center",gap:12,padding:"12px 16px",backgroundColor:"#0d1424",borderBottom:"1px solid #1e293b"},
-  pozBlok:{borderTop:"1px solid #1e293b"},
-  pozBlokBaslik:{padding:"12px 16px",backgroundColor:"#0a0f1e"},
-  cetvelBaslik:{display:"flex",gap:8,padding:"7px 14px",backgroundColor:"#050a14",fontSize:10,color:"#475569",fontWeight:700,textTransform:"uppercase"},
-  cetvelSatir:{display:"flex",gap:8,padding:"7px 14px",alignItems:"center",borderTop:"1px solid #1e293b"},
-  cetvelSatirMinha:{backgroundColor:"#0f0505",borderLeft:"3px solid #ef4444"},
-  minhaEtiket:{fontSize:9,fontWeight:800,color:"#ef4444",backgroundColor:"#7f1d1d33",padding:"2px 5px",borderRadius:4,whiteSpace:"nowrap"},
-  minhaToggleBtn:{width:24,height:24,borderRadius:5,border:"1px solid #1e293b",backgroundColor:"#1e293b",color:"#64748b",cursor:"pointer",fontSize:13,fontWeight:700,display:"flex",alignItems:"center",justifyContent:"center"},
-  minhaToggleBtnAktif:{backgroundColor:"#7f1d1d",borderColor:"#ef4444",color:"#fca5a5"},
-  toggle:{display:"flex",backgroundColor:"#1e293b",borderRadius:6,overflow:"hidden"},
-  toggleBtn:{padding:"3px 7px",fontSize:11,border:"none",backgroundColor:"transparent",color:"#64748b",cursor:"pointer"},
-  toggleBtnAktif:{backgroundColor:"#3b82f6",color:"#fff",fontWeight:700},
-  toggleBtnMinha:{backgroundColor:"#7f1d1d",color:"#fca5a5",fontWeight:700},
-  satirInput:{width:"100%",backgroundColor:"#1e293b",border:"1px solid #334155",borderRadius:6,color:"#e2e8f0",fontSize:12,padding:"4px 8px",outline:"none"},
-  sayiInput:{width:66,backgroundColor:"#1e293b",border:"1px solid #334155",borderRadius:6,color:"#e2e8f0",fontSize:12,padding:"4px 6px",outline:"none",textAlign:"center"},
-  satirEkleBtn:{padding:"8px 0",backgroundColor:"transparent",border:"none",color:"#3b82f6",cursor:"pointer",fontSize:12,fontWeight:600},
-  pozEkleBtn:{width:"100%",padding:"10px 0",backgroundColor:"transparent",border:"none",borderTop:"2px dashed #1e293b",color:"#6366f1",cursor:"pointer",fontSize:13,fontWeight:700},
-  silBtn:{width:24,height:24,background:"transparent",border:"1px solid #1e293b",borderRadius:5,color:"#475569",cursor:"pointer",fontSize:11,flexShrink:0},
-  tehlikeBtn:{background:"transparent",border:"none",cursor:"pointer",fontSize:15,padding:"2px 6px",color:"#475569"},
-  pozKart:{backgroundColor:"#111827",border:"1px solid #1e293b",borderRadius:10,padding:"12px 14px"},
+  // Layout
+  root:{display:"flex",height:"100vh",backgroundColor:"#07090f",fontFamily:"'Inter','Segoe UI',system-ui,sans-serif",color:"#e2e8f0",overflow:"hidden"},
+  sidebar:{width:220,backgroundColor:"#0d1117",borderRight:"1px solid #161b22",display:"flex",flexDirection:"column",flexShrink:0,overflow:"hidden"},
+  main:{flex:1,overflow:"auto",backgroundColor:"#07090f"},
+
+  // Sidebar
+  logo:{display:"flex",alignItems:"center",gap:10,padding:"16px 14px 14px",borderBottom:"1px solid #161b22"},
+  logoTitle:{fontSize:14,fontWeight:800,color:"#f0f6fc",letterSpacing:"-0.3px"},logoSub:{fontSize:10,color:"#484f58"},
+  navItem:{display:"flex",alignItems:"center",gap:9,padding:"7px 10px",borderRadius:7,border:"none",background:"transparent",color:"#7d8590",cursor:"pointer",fontSize:12,fontWeight:500,width:"100%",textAlign:"left",transition:"all 0.1s"},
+  navItemAktif:{backgroundColor:"#1c2128",color:"#79c0ff",fontWeight:600},
+  navBolum:{padding:"6px 8px"},
+  sidebarAlt:{display:"flex",justifyContent:"space-between",padding:"10px 14px",borderTop:"1px solid #161b22"},
+  miniEtiket:{fontSize:9,color:"#484f58",fontWeight:700,textTransform:"uppercase",letterSpacing:"0.5px",marginBottom:2},
+  miniDeger:{fontSize:12,fontWeight:800,color:"#79c0ff"},
+  excelBtn:{margin:"8px 8px",padding:"8px 0",backgroundColor:"#0d2818",border:"1px solid #238636",borderRadius:7,color:"#3fb950",cursor:"pointer",fontSize:11,fontWeight:700,transition:"all 0.1s"},
+  excelBtnBuyuk:{padding:"8px 16px",backgroundColor:"#0d2818",border:"1px solid #238636",borderRadius:7,color:"#3fb950",cursor:"pointer",fontSize:12,fontWeight:700},
+  projelerBaslik:{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 14px 6px"},
+  miniEkleBtn:{width:22,height:22,borderRadius:5,border:"1px solid #21262d",backgroundColor:"#21262d",color:"#79c0ff",cursor:"pointer",fontSize:14,display:"flex",alignItems:"center",justifyContent:"center"},
+  projeListe:{flex:1,overflowY:"auto",padding:"0 6px"},
+  projeTab:{display:"flex",alignItems:"center",gap:8,padding:"7px 10px",borderRadius:8,cursor:"pointer",marginBottom:2,borderLeft:"3px solid transparent"},
+  projeTabAktif:{backgroundColor:"#1c2128"},
+
+  // Ekran
+  ekran:{padding:"24px 28px",maxWidth:1200,margin:"0 auto"},
+  ekranBaslik:{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:24},
+  h1:{fontSize:18,fontWeight:800,color:"#f0f6fc",margin:0,letterSpacing:"-0.3px"},
+  aciklama:{fontSize:12,color:"#484f58",margin:"3px 0 0"},
+
+  // Metraj cetveli
+  bolumBlok:{backgroundColor:"#0d1117",border:"1px solid #21262d",borderRadius:10,marginBottom:14,overflow:"hidden"},
+  bolumBaslik:{display:"flex",alignItems:"center",gap:10,padding:"11px 16px",backgroundColor:"#0d1117",borderBottom:"1px solid #161b22"},
+  pozBlok:{borderTop:"1px solid #161b22"},
+  pozBlokBaslik:{padding:"10px 16px",backgroundColor:"#070a0f"},
+  cetvelBaslik:{display:"flex",gap:6,padding:"6px 14px",backgroundColor:"#030508",fontSize:9,color:"#484f58",fontWeight:700,textTransform:"uppercase",letterSpacing:"0.6px"},
+  cetvelSatir:{display:"flex",gap:6,padding:"6px 14px",alignItems:"center",borderTop:"1px solid #161b22"},
+  cetvelSatirMinha:{backgroundColor:"#100808",borderLeft:"3px solid #da3633"},
+  minhaEtiket:{fontSize:9,fontWeight:800,color:"#f85149",backgroundColor:"#da363318",padding:"2px 5px",borderRadius:4,whiteSpace:"nowrap"},
+  minhaToggleBtn:{width:24,height:24,borderRadius:5,border:"1px solid #21262d",backgroundColor:"#161b22",color:"#7d8590",cursor:"pointer",fontSize:12,fontWeight:700,display:"flex",alignItems:"center",justifyContent:"center",transition:"all 0.1s"},
+  minhaToggleBtnAktif:{backgroundColor:"#da363330",borderColor:"#da3633",color:"#f85149"},
+  toggle:{display:"flex",backgroundColor:"#161b22",borderRadius:5,overflow:"hidden"},
+  toggleBtn:{padding:"3px 8px",fontSize:10,border:"none",backgroundColor:"transparent",color:"#7d8590",cursor:"pointer",fontWeight:500},
+  toggleBtnAktif:{backgroundColor:"#1f6feb",color:"#fff",fontWeight:700},
+  toggleBtnMinha:{backgroundColor:"#da363330",color:"#f85149",fontWeight:700},
+  satirInput:{width:"100%",backgroundColor:"#161b22",border:"1px solid #21262d",borderRadius:5,color:"#e6edf3",fontSize:12,padding:"4px 8px",outline:"none",transition:"border-color 0.15s"},
+  sayiInput:{width:64,backgroundColor:"#161b22",border:"1px solid #21262d",borderRadius:5,color:"#e6edf3",fontSize:12,padding:"4px 6px",outline:"none",textAlign:"center"},
+  satirEkleBtn:{padding:"7px 0",backgroundColor:"transparent",border:"none",color:"#1f6feb",cursor:"pointer",fontSize:11,fontWeight:600},
+  pozEkleBtn:{width:"100%",padding:"10px 0",backgroundColor:"transparent",border:"none",borderTop:"2px dashed #21262d",color:"#7948d3",cursor:"pointer",fontSize:12,fontWeight:700},
+  silBtn:{width:22,height:22,background:"transparent",border:"1px solid #21262d",borderRadius:4,color:"#7d8590",cursor:"pointer",fontSize:10,flexShrink:0,transition:"all 0.1s"},
+  tehlikeBtn:{background:"transparent",border:"none",cursor:"pointer",fontSize:14,padding:"2px 6px",color:"#7d8590"},
+
+  // Kütüphane
+  pozKart:{backgroundColor:"#0d1117",border:"1px solid #21262d",borderRadius:10,padding:"12px 14px",cursor:"pointer",transition:"border-color 0.15s, background-color 0.15s"},
   chip:{fontSize:10,fontWeight:600,padding:"2px 7px",borderRadius:20},
-  bosEkran:{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:80,color:"#475569"},
-  toplamKutu:{backgroundColor:"#0d1f3c",border:"1px solid #1e3a5f",borderRadius:10,padding:"10px 16px",textAlign:"right"},
-  filtreSatiri:{display:"flex",gap:8,marginBottom:12,flexWrap:"wrap"},
-  aramaKutu:{flex:1,minWidth:180,display:"flex",alignItems:"center",gap:8,backgroundColor:"#111827",border:"1px solid #1e293b",borderRadius:8,padding:"0 12px"},
-  aramaInput:{flex:1,background:"transparent",border:"none",outline:"none",color:"#e2e8f0",fontSize:13,padding:"8px 0"},
-  temizleBtn:{background:"transparent",border:"none",color:"#475569",cursor:"pointer",fontSize:13},
-  select:{backgroundColor:"#111827",border:"1px solid #1e293b",borderRadius:8,color:"#94a3b8",fontSize:12,padding:"8px 10px",outline:"none",cursor:"pointer"},
-  overlay:{position:"fixed",inset:0,backgroundColor:"rgba(0,0,0,0.65)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:100},
-  modal:{backgroundColor:"#111827",border:"1px solid #1e293b",borderRadius:16,padding:26,width:420,position:"relative"},
-  modalBaslik:{fontSize:16,fontWeight:800,color:"#f1f5f9",marginBottom:16},
-  formEtiket:{fontSize:11,color:"#475569",fontWeight:700,textTransform:"uppercase",display:"block",marginBottom:6},
-  formInput:{width:"100%",backgroundColor:"#0a0f1e",border:"1px solid #1e293b",borderRadius:8,color:"#e2e8f0",fontSize:13,padding:"9px 12px",outline:"none",boxSizing:"border-box"},
-  birincilBtn:{padding:"9px 18px",backgroundColor:"#1e3a5f",border:"1px solid #3b82f6",borderRadius:8,color:"#60a5fa",fontSize:13,fontWeight:700,cursor:"pointer"},
-  ikinciBtn:{padding:"9px 18px",backgroundColor:"#1e293b",border:"1px solid #334155",borderRadius:8,color:"#94a3b8",fontSize:13,fontWeight:600,cursor:"pointer"},
-  detayBtn:{fontSize:11,color:"#94a3b8",backgroundColor:"transparent",border:"1px solid #1e293b",borderRadius:6,padding:"4px 10px",cursor:"pointer"},
-  tablo:{backgroundColor:"#111827",border:"1px solid #1e293b",borderRadius:12,overflow:"hidden"},
-  tabloBaslik:{display:"flex",gap:10,padding:"10px 14px",backgroundColor:"#0d1424",fontSize:10,color:"#475569",fontWeight:700,textTransform:"uppercase",letterSpacing:"0.4px"},
-  tabloSatir:{display:"flex",gap:10,padding:"10px 14px",alignItems:"center",borderTop:"1px solid #1e293b"},
-  tabloToplam:{display:"flex",gap:10,padding:"12px 14px",alignItems:"center",borderTop:"2px solid #1e3a5f",backgroundColor:"#0d1424"},
+  filtreSatiri:{display:"flex",gap:8,marginBottom:14,flexWrap:"wrap"},
+  aramaKutu:{flex:1,minWidth:180,display:"flex",alignItems:"center",gap:8,backgroundColor:"#161b22",border:"1px solid #21262d",borderRadius:8,padding:"0 12px",transition:"border-color 0.15s"},
+  aramaInput:{flex:1,background:"transparent",border:"none",outline:"none",color:"#e6edf3",fontSize:13,padding:"8px 0"},
+  temizleBtn:{background:"transparent",border:"none",color:"#7d8590",cursor:"pointer",fontSize:13},
+  select:{backgroundColor:"#161b22",border:"1px solid #21262d",borderRadius:7,color:"#7d8590",fontSize:12,padding:"7px 10px",outline:"none",cursor:"pointer"},
+
+  // Modaller
+  overlay:{position:"fixed",inset:0,backgroundColor:"rgba(1,4,9,0.8)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:100,backdropFilter:"blur(4px)"},
+  modal:{backgroundColor:"#161b22",border:"1px solid #30363d",borderRadius:14,padding:24,width:420,position:"relative",boxShadow:"0 16px 48px rgba(1,4,9,0.7)"},
+  modalBaslik:{fontSize:16,fontWeight:800,color:"#f0f6fc",marginBottom:16},
+  formEtiket:{fontSize:11,color:"#7d8590",fontWeight:600,textTransform:"uppercase",letterSpacing:"0.4px",display:"block",marginBottom:5},
+  formInput:{width:"100%",backgroundColor:"#0d1117",border:"1px solid #30363d",borderRadius:7,color:"#e6edf3",fontSize:13,padding:"8px 11px",outline:"none",boxSizing:"border-box",transition:"border-color 0.15s"},
+
+  // Butonlar
+  birincilBtn:{padding:"8px 16px",backgroundColor:"#1f6feb",border:"1px solid #1f6feb",borderRadius:7,color:"#ffffff",fontSize:12,fontWeight:600,cursor:"pointer",transition:"all 0.1s"},
+  ikinciBtn:{padding:"8px 16px",backgroundColor:"#21262d",border:"1px solid #30363d",borderRadius:7,color:"#c9d1d9",fontSize:12,fontWeight:500,cursor:"pointer",transition:"all 0.1s"},
+  detayBtn:{fontSize:11,color:"#7d8590",backgroundColor:"transparent",border:"1px solid #21262d",borderRadius:5,padding:"3px 9px",cursor:"pointer"},
+
+  // Tablolar
+  tablo:{backgroundColor:"#0d1117",border:"1px solid #21262d",borderRadius:10,overflow:"hidden"},
+  tabloBaslik:{display:"flex",gap:10,padding:"9px 14px",backgroundColor:"#070a0f",fontSize:10,color:"#7d8590",fontWeight:700,textTransform:"uppercase",letterSpacing:"0.5px"},
+  tabloSatir:{display:"flex",gap:10,padding:"9px 14px",alignItems:"center",borderTop:"1px solid #161b22"},
+  tabloToplam:{display:"flex",gap:10,padding:"10px 14px",alignItems:"center",borderTop:"2px solid #1f6feb33",backgroundColor:"#070a0f"},
+
+  // Diğer
+  bosEkran:{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:80,color:"#484f58"},
+  toplamKutu:{backgroundColor:"#0d2818",border:"1px solid #238636",borderRadius:9,padding:"10px 16px",textAlign:"right"},
 };
 
-// ── PDF Import Ekranı ─────────────────────────────────────────────
-function PdfImportEkrani({ setPozlar, setPozKaynagi, mevcutPozSayisi, pozKaynagi, setAnaEkran }) {
-  const [durum, setDurum] = useState("bos"); // bos | yukleniyor | analiz | onay | hata
-  const [pdfBase64, setPdfBase64] = useState(null);
-  const [dosyaAdi, setDosyaAdi] = useState("");
-  const [analizSonucu, setAnalizSonucu] = useState(null);
-  const [hata, setHata] = useState("");
-  const [surukle, setSurukle] = useState(false);
-  const [yil, setYil] = useState("2026");
-  const AYLAR_TR = ["Ocak","Şubat","Mart","Nisan","Mayıs","Haziran","Temmuz","Ağustos","Eylül","Ekim","Kasım","Aralık"];
-  const [ay, setAy] = useState("");
-  const [listeTipi, setListeTipi] = useState("İnşaat Birim Fiyat");
-
-  const dosyaOku = (file) => {
-    if (!file) { setHata("Dosya seçilemedi."); setDurum("hata"); return; }
-    // iPad/Mac'te PDF MIME type farklı gelebilir, uzantıyı da kontrol et
-    const isPdf = file.type === "application/pdf" || file.type === "application/octet-stream" || file.name.toLowerCase().endsWith(".pdf");
-    if (!isPdf) { setHata("Lütfen PDF dosyası seçin."); setDurum("hata"); return; }
-    setDosyaAdi(file.name); setDurum("yukleniyor");
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      const result = e.target.result;
-      const base64 = result.includes(",") ? result.split(",")[1] : result;
-      setPdfBase64(base64);
-      setDurum("hazir");
-    };
-    reader.onerror = (e) => { setHata("Dosya okunamadı: " + (e.target.error?.message || "bilinmeyen hata")); setDurum("hata"); };
-    reader.readAsDataURL(file);
-  };
-
-  const pdfAnaliz = async () => {
-    if (!pdfBase64) return;
-    setDurum("analiz");
-    setHata("");
-    try {
-      const sistem = `Sen Türk inşaat sektörü birim fiyat listesi uzmanısın. 
-Sana verilen PDF, Çevre, Şehircilik ve İklim Değişikliği Bakanlığı Yüksek Fen Kurulu tarafından yayınlanan resmi birim fiyat listesidir.
-PDF'den tüm pozları çıkar ve SADECE aşağıdaki JSON formatında yanıt ver, başka hiçbir şey yazma:
-{
-  "yil": "2026",
-  "ay": "Ocak veya null",
-  "tip": "İnşaat Birim Fiyat veya Mekanik veya Elektrik",
-  "pozlar": [
-    {
-      "no": "poz numarası (örn: 16.001/1)",
-      "tanim": "pozun tam tanımı",
-      "birim": "m², m³, m, kg, ton, adet vb.",
-      "birimFiyat": 1234.56
-    }
-  ]
-}
-Kategorileri şu gruplardan birine ata: Beton İşleri, Demir İşleri, Kaba İnşaat, İnce İnşaat, Tesisat, Elektrik, Zemin İşleri, Nakliye, Diğer.
-birimFiyat sadece sayı olsun (TL simgesi ve virgül olmadan, nokta ondalık ayracı).
-Eğer birim fiyat aylık güncelleme listesindeyse o güncel fiyatı kullan.
-Maksimum 200 poz çıkar, en önemli ve sık kullanılanları önceliklendir.`;
-
-      const resp = await fetch("https://api.anthropic.com/v1/messages", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          model: "claude-sonnet-4-20250514",
-          max_tokens: 8000,
-          system: sistem,
-          messages: [{
-            role: "user",
-            content: [{
-              type: "document",
-              source: { type: "base64", media_type: "application/pdf", data: pdfBase64 }
-            }, {
-              type: "text",
-              text: `Bu PDF'den birim fiyat pozlarını çıkar. Yıl: ${yil}, ${ay ? "Ay: " + ay + "," : ""} Liste tipi: ${listeTipi}. SADECE JSON döndür.`
-            }]
-          }]
-        })
-      });
-
-      if (!resp.ok) throw new Error(`API hatası: ${resp.status}`);
-      const data = await resp.json();
-      const rawText = data.content.map(c => c.text || "").join("");
-      
-      // JSON temizle
-      const jsonMatch = rawText.match(/\{[\s\S]*\}/);
-      if (!jsonMatch) throw new Error("PDF'den poz çıkarılamadı. Farklı bir sayfa deneyin.");
-      
-      const parsed = JSON.parse(jsonMatch[0]);
-      if (!parsed.pozlar || parsed.pozlar.length === 0) throw new Error("Bu PDF'de poz bulunamadı.");
-      
-      // Kategori ata
-      const kategoriMap = {
-        "16.":"Beton İşleri","21.":"Demir İşleri","23.":"Kaba İnşaat","27.":"İnce İnşaat",
-        "08.":"Tesisat","09.":"Elektrik","12.":"Zemin İşleri","13.":"Nakliye"
-      };
-      parsed.pozlar = parsed.pozlar.map((p, i) => {
-        let kat = "Diğer";
-        for (const [prefix, k] of Object.entries(kategoriMap)) {
-          if (p.no && p.no.startsWith(prefix)) { kat = k; break; }
-        }
-        if (listeTipi.includes("Elektrik")) kat = "Elektrik";
-        if (listeTipi.includes("Mekanik") || listeTipi.includes("Tesisat")) kat = "Tesisat";
-        return {
-          id: Date.now() + i,
-          no: p.no || "?",
-          tanim: p.tanim || "",
-          birim: p.birim || "adet",
-          birimFiyat: parseFloat(p.birimFiyat) || 0,
-          idare: "Çevre ve Şehircilik",
-          kategori: kat,
-          kaynak: `${parsed.yil || yil}${parsed.ay ? " " + parsed.ay : ""}`,
-        };
-      });
-
-      setAnalizSonucu(parsed);
-      setDurum("onay");
-    } catch (err) {
-      setHata(err.message || "Beklenmeyen hata.");
-      setDurum("hata");
-    }
-  };
-
-  const pozlariUygula = (mod) => {
-    // mod: "yenile" = tamamen değiştir, "ekle" = mevcut + yeni
-    const yeniPozlar = analizSonucu.pozlar;
-    if (mod === "yenile") {
-      setPozlar(yeniPozlar);
-    } else {
-      // Mevcut pozlarda olmayanları ekle, olanları fiyat güncelle
-      setPozlar(prev => {
-        const noMap = new Map(prev.map(p => [p.no, p]));
-        const guncellenecek = [];
-        const eklenecek = [];
-        yeniPozlar.forEach(yp => {
-          if (noMap.has(yp.no)) guncellenecek.push(yp);
-          else eklenecek.push(yp);
-        });
-        const guncellendi = prev.map(p => {
-          const yeni = yeniPozlar.find(yp => yp.no === p.no);
-          return yeni ? { ...p, birimFiyat: yeni.birimFiyat, kaynak: yeni.kaynak } : p;
-        });
-        return [...guncellendi, ...eklenecek];
-      });
-    }
-    setPozKaynagi({
-      yil: parseInt(yil),
-      ay: ay || null,
-      tip: listeTipi,
-    });
-    setDurum("tamam");
-  };
-
-  return (
-    <div style={S.ekran}>
-      <div style={S.ekranBaslik}>
-        <div>
-          <h1 style={S.h1}>📤 Poz Güncelleme</h1>
-          <p style={S.aciklama}>Bakanlık PDF'inden poz kütüphanesini güncelle</p>
-        </div>
-        <div style={{backgroundColor:"#111827",border:"1px solid #1e293b",borderRadius:10,padding:"10px 16px",textAlign:"right"}}>
-          <div style={{fontSize:10,color:"#475569",fontWeight:700,textTransform:"uppercase"}}>Mevcut Kaynak</div>
-          <div style={{fontSize:13,color:"#60a5fa",fontWeight:700}}>{pozKaynagi.tip} {pozKaynagi.yil}{pozKaynagi.ay ? " / " + pozKaynagi.ay : ""}</div>
-          <div style={{fontSize:11,color:"#475569"}}>{mevcutPozSayisi} poz</div>
-        </div>
-      </div>
-
-      {/* Adım göstergesi */}
-      <div style={{display:"flex",gap:0,marginBottom:28,backgroundColor:"#111827",borderRadius:10,overflow:"hidden",border:"1px solid #1e293b"}}>
-        {[["1","PDF Yükle",["bos","hazir","yukleniyor"]],["2","Analiz Et",["analiz"]],["3","Onayla",["onay","tamam"]]].map(([num,lab,aktifler],i)=>{
-          const aktif = aktifler.includes(durum) || (num==="3" && durum==="tamam");
-          const tamamlandi = (num==="1" && ["analiz","onay","tamam"].includes(durum)) || (num==="2" && ["onay","tamam"].includes(durum));
-          return (
-            <div key={num} style={{flex:1,padding:"12px 0",textAlign:"center",backgroundColor:tamamlandi?"#052e16":aktif?"#0d1f3c":"transparent",borderRight:i<2?"1px solid #1e293b":"none"}}>
-              <div style={{fontSize:18,marginBottom:3}}>{tamamlandi?"✅":aktif?"🔵":"⚪"}</div>
-              <div style={{fontSize:11,fontWeight:700,color:tamamlandi?"#4ade80":aktif?"#60a5fa":"#475569"}}>{num}. {lab}</div>
-            </div>
-          );
-        })}
-      </div>
-
-      {/* Bilgi kartı */}
-      <div style={{backgroundColor:"#0d1f3c",border:"1px solid #1e3a5f",borderRadius:10,padding:"14px 18px",marginBottom:20}}>
-        <div style={{fontSize:12,color:"#60a5fa",fontWeight:700,marginBottom:6}}>📌 Nasıl Kullanılır?</div>
-        <div style={{fontSize:12,color:"#94a3b8",lineHeight:1.7}}>
-          1. <a href="https://yfk.csb.gov.tr/birim-fiyatlar-100468" target="_blank" style={{color:"#60a5fa"}}>yfk.csb.gov.tr</a> adresinden birim fiyat PDF'ini indir<br/>
-          2. Aylık güncelleme için <a href="https://yfk.csb.gov.tr/aylik-guncel-rayic-ve-birim-fiyat-listeleri-113351" target="_blank" style={{color:"#60a5fa"}}>aylık liste sayfasından</a> ilgili ayı indir<br/>
-          3. PDF'i aşağıya yükle → Claude otomatik parse eder → Onayla
-        </div>
-      </div>
-
-      {/* Ayarlar */}
-      {(durum === "bos" || durum === "hazir" || durum === "hata") && (
-        <div style={{display:"flex",gap:10,marginBottom:16,flexWrap:"wrap"}}>
-          <div style={{flex:1,minWidth:120}}>
-            <label style={S.formEtiket}>Yıl</label>
-            <select style={{...S.select,width:"100%"}} value={yil} onChange={e=>setYil(e.target.value)}>
-              {["2026","2025","2024"].map(y=><option key={y}>{y}</option>)}
-            </select>
-          </div>
-          <div style={{flex:1,minWidth:140}}>
-            <label style={S.formEtiket}>Ay (aylık güncelleme ise)</label>
-            <select style={{...S.select,width:"100%"}} value={ay} onChange={e=>setAy(e.target.value)}>
-              <option value="">Yıllık liste</option>
-              {AYLAR_TR.map(a=><option key={a}>{a}</option>)}
-            </select>
-          </div>
-          <div style={{flex:2,minWidth:180}}>
-            <label style={S.formEtiket}>Liste Tipi</label>
-            <select style={{...S.select,width:"100%"}} value={listeTipi} onChange={e=>setListeTipi(e.target.value)}>
-              {["İnşaat Birim Fiyat","Mekanik Tesisat Birim Fiyat","Elektrik Tesisat Birim Fiyat","İnşaat Rayiç","Mekanik Rayiç","Elektrik Rayiç"].map(t=><option key={t}>{t}</option>)}
-            </select>
-          </div>
-        </div>
-      )}
-
-      {/* Yükleme alanı */}
-      {(durum === "bos" || durum === "hata") && (
-        <div
-          style={{border:`2px dashed ${surukle?"#3b82f6":"#1e293b"}`,borderRadius:12,padding:"48px 24px",
-            textAlign:"center",backgroundColor:surukle?"#0d1f3c":"#111827",transition:"all 0.2s",cursor:"pointer"}}
-          onDragOver={e=>{e.preventDefault();setSurukle(true)}}
-          onDragLeave={()=>setSurukle(false)}
-          onDrop={e=>{e.preventDefault();setSurukle(false);dosyaOku(e.dataTransfer.files[0])}}
-          onClick={()=>document.getElementById("pdfInput").click()}>
-          <input id="pdfInput" type="file" accept=".pdf" style={{display:"none"}} onChange={e=>dosyaOku(e.target.files[0])}/>
-          <div style={{fontSize:48,marginBottom:12}}>📄</div>
-          <div style={{fontSize:15,fontWeight:700,color:"#e2e8f0",marginBottom:6}}>PDF'i buraya sürükle veya tıkla</div>
-          <div style={{fontSize:12,color:"#475569"}}>Çevre ve Şehircilik Bakanlığı birim fiyat veya rayiç listesi</div>
-          {hata && <div style={{marginTop:12,color:"#ef4444",fontSize:12,fontWeight:600}}>{hata}</div>}
-        </div>
-      )}
-
-      {/* Dosya hazır */}
-      {durum === "hazir" && (
-        <div style={{backgroundColor:"#111827",border:"1px solid #1e293b",borderRadius:10,padding:20}}>
-          <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:16}}>
-            <span style={{fontSize:32}}>📄</span>
-            <div>
-              <div style={{fontSize:14,fontWeight:700,color:"#e2e8f0"}}>{dosyaAdi}</div>
-              <div style={{fontSize:12,color:"#475569",marginTop:2}}>{yil} {ay||"Yıllık"} — {listeTipi}</div>
-            </div>
-            <button style={{marginLeft:"auto",...S.ikinciBtn,padding:"6px 12px",fontSize:12}} onClick={()=>{setDurum("bos");setPdfBase64(null);}}>✕ Kaldır</button>
-          </div>
-          <button style={{...S.birincilBtn,width:"100%",padding:"12px 0",fontSize:14,backgroundColor:"#052e16",borderColor:"#16a34a",color:"#4ade80"}} onClick={pdfAnaliz}>
-            🤖 Claude ile Analiz Et
-          </button>
-        </div>
-      )}
-
-      {/* Analiz sürüyor */}
-      {durum === "analiz" && (
-        <div style={{backgroundColor:"#111827",border:"1px solid #1e293b",borderRadius:12,padding:40,textAlign:"center"}}>
-          <div style={{fontSize:48,marginBottom:16,animation:"pulse 1.5s infinite"}}>🤖</div>
-          <div style={{fontSize:16,fontWeight:700,color:"#e2e8f0",marginBottom:8}}>PDF Analiz Ediliyor...</div>
-          <div style={{fontSize:13,color:"#475569",marginBottom:20}}>Claude birim fiyat listesini okuyor ve pozları çıkarıyor</div>
-          <div style={{display:"flex",gap:6,justifyContent:"center"}}>
-            {[0,1,2].map(i=>(
-              <div key={i} style={{width:8,height:8,borderRadius:"50%",backgroundColor:"#3b82f6",
-                animation:`bounce 1s ${i*0.2}s infinite`}}/>
-            ))}
-          </div>
-          <style>{`@keyframes bounce{0%,100%{transform:translateY(0)}50%{transform:translateY(-8px)}}`}</style>
-        </div>
-      )}
-
-      {/* Onay */}
-      {durum === "onay" && analizSonucu && (
-        <div>
-          <div style={{backgroundColor:"#052e16",border:"1px solid #16a34a",borderRadius:10,padding:"14px 18px",marginBottom:16,display:"flex",alignItems:"center",gap:12}}>
-            <span style={{fontSize:24}}>✅</span>
-            <div>
-              <div style={{fontSize:14,fontWeight:700,color:"#4ade80"}}>Analiz Tamamlandı!</div>
-              <div style={{fontSize:12,color:"#86efac",marginTop:2}}>
-                {analizSonucu.pozlar.length} poz çıkarıldı — {analizSonucu.yil || yil} {analizSonucu.ay || ay || "Yıllık"} {listeTipi}
-              </div>
-            </div>
-          </div>
-
-          {/* Önizleme tablosu */}
-          <div style={{...S.tablo,marginBottom:16,maxHeight:320,overflow:"auto"}}>
-            <div style={S.tabloBaslik}>
-              <span style={{flex:1}}>Poz No</span>
-              <span style={{flex:3}}>Tarif</span>
-              <span style={{flex:0.8,textAlign:"center"}}>Birim</span>
-              <span style={{flex:1.2,textAlign:"right"}}>Birim Fiyat (₺)</span>
-              <span style={{flex:1}}>Kategori</span>
-            </div>
-            {analizSonucu.pozlar.slice(0,50).map((p,i)=>(
-              <div key={i} style={S.tabloSatir}>
-                <span style={{flex:1,fontFamily:"monospace",fontSize:11,color:"#6366f1"}}>{p.no}</span>
-                <span style={{flex:3,fontSize:11,color:"#cbd5e1"}}>{p.tanim}</span>
-                <span style={{flex:0.8,textAlign:"center",fontSize:11,color:"#94a3b8"}}>{p.birim}</span>
-                <span style={{flex:1.2,textAlign:"right",fontSize:12,color:"#10b981",fontWeight:700}}>₺{fmt(p.birimFiyat)}</span>
-                <span style={{flex:1}}>
-                  <span style={{fontSize:9,padding:"2px 6px",borderRadius:10,backgroundColor:(KAT_RENK[p.kategori]||"#475569")+"22",color:KAT_RENK[p.kategori]||"#475569"}}>{p.kategori}</span>
-                </span>
-              </div>
-            ))}
-            {analizSonucu.pozlar.length > 50 && (
-              <div style={{padding:"10px 16px",fontSize:12,color:"#475569",textAlign:"center",borderTop:"1px solid #1e293b"}}>
-                ... ve {analizSonucu.pozlar.length - 50} poz daha
-              </div>
-            )}
-          </div>
-
-          {/* Uygulama seçenekleri */}
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
-            <button
-              style={{...S.birincilBtn,padding:"14px 0",backgroundColor:"#052e16",borderColor:"#16a34a",color:"#4ade80",fontSize:13}}
-              onClick={()=>pozlariUygula("yenile")}>
-              🔄 Kütüphaneyi Tamamen Yenile
-              <div style={{fontSize:10,color:"#86efac",fontWeight:400,marginTop:3}}>Mevcut {mevcutPozSayisi} poz silinir</div>
-            </button>
-            <button
-              style={{...S.birincilBtn,padding:"14px 0",fontSize:13}}
-              onClick={()=>pozlariUygula("ekle")}>
-              ➕ Mevcut Kütüphaneye Ekle / Güncelle
-              <div style={{fontSize:10,color:"#93c5fd",fontWeight:400,marginTop:3}}>Fiyatlar güncellenir, yeni pozlar eklenir</div>
-            </button>
-          </div>
-          <button style={{...S.ikinciBtn,marginTop:8,width:"100%"}} onClick={()=>{setDurum("hazir");setAnalizSonucu(null);}}>← Geri Dön</button>
-        </div>
-      )}
-
-      {/* Başarı */}
-      {durum === "tamam" && (
-        <div style={{textAlign:"center",padding:60}}>
-          <div style={{fontSize:64,marginBottom:16}}>🎉</div>
-          <div style={{fontSize:20,fontWeight:800,color:"#4ade80",marginBottom:8}}>Poz Kütüphanesi Güncellendi!</div>
-          <div style={{fontSize:13,color:"#475569",marginBottom:24}}>
-            {analizSonucu?.pozlar?.length} poz başarıyla yüklendi
-          </div>
-          <div style={{display:"flex",gap:12,justifyContent:"center"}}>
-            <button style={{...S.birincilBtn}} onClick={()=>setAnaEkran("kutuphane")}>📚 Kütüphaneye Git</button>
-            <button style={{...S.ikinciBtn}} onClick={()=>{setDurum("bos");setPdfBase64(null);setAnalizSonucu(null);}}>Başka PDF Yükle</button>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
 
 // ── Hakediş Cetveli ───────────────────────────────────────────────
